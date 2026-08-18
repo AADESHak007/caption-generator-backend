@@ -14,8 +14,23 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.CLIENT_URL,
+  'https://caption-generator-frontend-delta.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001'
+].filter(Boolean) as string[];
+
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      callback(null, true);
+    } else {
+      callback(null, true);
+    }
+  },
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
