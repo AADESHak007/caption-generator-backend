@@ -115,3 +115,65 @@ Below is the verified response output generated for `DISCIPLINE - Motivational S
     ]
 }
 ```
+
+---
+
+## 4. Live Testing Example
+
+The benchmark output in Section 3 was produced from a real end-to-end run against the locally hosted backend. This section documents the source clip, request configuration, and verified proof of execution.
+
+### 4.1 Source Clip
+
+| Field | Value |
+| :--- | :--- |
+| **Source URL** | https://youtube.com/shorts/48BnYG54694?si=aJ8yoqjWh_W-7K2E |
+| **Format** | YouTube Short (vertical, 9:16) |
+| **Local Filename** | `DISCIPLINE - Motivational Speech - Ben Lionel Scott (1080p, h264).mp4` |
+| **Normalized Spec** | H.264 / AAC, 1080p, 30fps |
+| **Analyzed Duration** | ~15.14s (final caption `endTime`) |
+
+> [!NOTE]
+> The clip was downloaded and normalized locally before being submitted to the API. The pipeline itself accepts a **raw video file upload** — it does not ingest YouTube URLs directly. The URL above is recorded only to identify the source of the test asset.
+
+### 4.2 Request Configuration
+
+| Parameter | Value |
+| :--- | :--- |
+| **Method** | `POST` |
+| **Endpoint** | `http://localhost:3000/api/analyze-video` |
+| **Body Type** | `form-data` |
+| **Body Key** | `video` (type: `File`) |
+| **LLM Provider** | `gemini` |
+| **keepTemp** | `false` (auto-cleanup enabled) |
+
+### 4.3 Verified Result
+
+| Metric | Value |
+| :--- | :--- |
+| **HTTP Status** | `200 OK` |
+| **Response Time** | `33.29 s` |
+| **Response Size** | `1.97 KB` |
+| **Captions Returned** | `5` |
+
+### 4.4 Proof of Backend Execution
+
+The screenshot below captures the live Postman run against the `analyze-video` route, showing the `200 OK` status, end-to-end latency, and the fully populated `captions` array with `screenPosition`, `detectedText`, `recommendedOverlayText`, and `recommendation` fields resolved per segment.
+
+<img width="1188" height="878" alt="image" src="https://github.com/user-attachments/assets/bcb3fe11-b545-4fda-8d42-f66639126ec9" />
+
+
+### 4.5 Latency Breakdown & Notes
+
+The observed **33.29 s** response time is a single-threaded, cold-path run on a local machine. The dominant contributors, in order:
+
+1. **FFmpeg normalization** — full re-encode to H.264/AAC 1080p30 before any analysis begins.
+2. **Whisper inference** — `Xenova/whisper-tiny` running on CPU via ONNX Runtime.
+3. **Visual model calls** — Gemini requests over frames extracted at 0.5 fps.
+4. **Frame extraction & I/O** — JPEG writes plus temp-directory cleanup.
+
+Known optimization levers for future iterations:
+
+- Skip full re-encode when the input already conforms to the target spec (probe first, transcode only on mismatch).
+- Run audio extraction/transcription **in parallel** with frame extraction rather than sequentially.
+- Replace fixed 0.5 fps sampling with **shot-boundary sampling**, so static segments contribute one frame instead of many.
+- Batch frames into fewer multimodal calls instead of per-frame requests.
