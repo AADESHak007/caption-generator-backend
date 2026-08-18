@@ -1,5 +1,6 @@
 import { pipeline } from '@xenova/transformers';
 import { GoogleGenAI, Type } from '@google/genai';
+import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -46,9 +47,13 @@ class AnalyzerService {
   }
 
   /**
-   * Transcribes audio locally using Whisper and determines screenPosition visually using Gemini.
+   * Transcribes audio locally using Whisper and determines screenPosition visually using Gemini or OpenAI.
    */
-  public static async analyzeMedia(audioPath: string, framesDir: string): Promise<CaptionSegment[]> {
+  public static async analyzeMedia(
+    audioPath: string,
+    framesDir: string,
+    llmProvider: 'gemini' | 'openai' = 'gemini'
+  ): Promise<CaptionSegment[]> {
     console.log(`[Whisper] Transcribing audio file locally: ${audioPath}`);
 
     let transcriber: any;
@@ -126,18 +131,32 @@ class AnalyzerService {
       return [];
     }
 
-    // 3. Perform Visual Position Analysis via Gemini
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-      throw new Error('AI Model is unavailable: GEMINI_API_KEY is not configured.');
-    }
+    // 3. Perform Visual Position Analysis via selected LLM Provider ('openai' vs 'gemini')
+    if (llmProvider === 'openai') {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey || apiKey === 'your_openai_api_key_here') {
+        throw new Error('AI Model is unavailable: OPENAI_API_KEY is not configured.');
+      }
+      try {
+        console.log('[OpenAI ChatGPT] Analyzing visual screen positions for captions...');
+        segments = await this.enhancePositionsWithOpenAI(apiKey, segments, framesDir);
+      } catch (openAiErr: any) {
+        console.error('[OpenAI ChatGPT] Model error:', openAiErr?.message || openAiErr);
+        throw new Error(`The OpenAI ChatGPT Model is currently unavailable. Please try again later.`);
+      }
+    } else {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+        throw new Error('AI Model is unavailable: GEMINI_API_KEY is not configured.');
+      }
 
-    try {
-      console.log('[Gemini AI] Analyzing visual screen positions for captions...');
-      segments = await this.enhancePositionsWithGemini(apiKey, segments, framesDir);
-    } catch (geminiErr: any) {
-      console.error('[Gemini AI] Model error:', geminiErr?.message || geminiErr);
-      throw new Error(`The AI Model is currently unavailable at this time. Please try again later.`);
+      try {
+        console.log('[Gemini AI] Analyzing visual screen positions for captions...');
+        segments = await this.enhancePositionsWithGemini(apiKey, segments, framesDir);
+      } catch (geminiErr: any) {
+        console.error('[Gemini AI] Model error:', geminiErr?.message || geminiErr);
+        throw new Error(`The AI Model is currently unavailable at this time. Please try again later.`);
+      }
     }
 
     return segments;
@@ -241,6 +260,99 @@ Return a JSON array containing objects corresponding to each segment.
     }
 
     throw new Error('AI Model (Gemini Flash) returned an unparseable response format.');
+  }
+
+  /**
+   * Calls OpenAI ChatGPT (GPT-4o / GPT-4o-mini Vision) to determine optimal screen positions.
+   */
+  private static async enhancePositionsWithOpenAI(
+    apiKey: string,
+    segments: CaptionSegment[],
+    framesDir: string
+  ): Promise<CaptionSegment[]> {
+    const openai = new OpenAI({ apiKey });
+
+    const frameFiles = fs.existsSync(framesDir)
+      ? fs.readdirSync(framesDir).filter(f => f.endsWith('.jpg')).sort()
+      : [];
+
+    if (frameFiles.length === 0) {
+      return segments;
+    }
+
+    const sampledFrames = frameFiles.filter((_, idx) => idx % Math.ceil(frameFiles.length / 5) === 0).slice(0, 5);
+
+    const imageContent: OpenAI.Chat.Completions.ChatCompletionContentPart[] = sampledFrames.map(frameFile => {
+      const framePath = path.join(framesDir, frameFile);
+      const fileBuffer = fs.readFileSync(framePath);
+      const base64Image = fileBuffer.toString('base64');
+      return {
+        type: 'image_url',
+        image_url: {
+          url: `data:image/jpeg;base64,${base64Image}`
+        }
+      };
+    });
+
+    const promptText = `
+You are an expert video editor, content strategist, and visual caption designer.
+
+Execute the following analysis pipeline step-by-step:
+
+Step 1: Inspect the provided spoken audio transcription segments:
+${JSON.stringify(segments, null, 2)}
+
+Step 2: Read and detect any pre-existing on-screen text ("detectedText") visible in the provided video frames for each timeframe.
+
+Step 3: Synthesize the spoken audio transcription (Step 1) AND on-screen text (Step 2) with the video subject layout to output a JSON object containing a "segments" key with an array of objects corresponding to each segment.
+
+Required properties for each segment object in the array:
+- "startTime": number
+- "endTime": number
+- "text": string
+- "detectedText": string (detected text in video frame, or "")
+- "recommendedOverlayText": string (high impact catchy English text overlay)
+- "screenPosition": string ("top", "middle", or "bottom")
+- "recommendation": string (English visual styling recommendations)
+`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            ...imageContent,
+            { type: 'text', text: promptText }
+          ]
+        }
+      ],
+      response_format: { type: 'json_object' }
+    });
+
+    const textOutput = response.choices[0]?.message?.content;
+    if (textOutput) {
+      try {
+        const jsonRes = JSON.parse(textOutput);
+        const updated = Array.isArray(jsonRes) ? jsonRes : (jsonRes.segments || jsonRes.data || []);
+        if (Array.isArray(updated)) {
+          return segments.map((seg, i) => {
+            const item = updated[i] || {};
+            return {
+              ...seg,
+              detectedText: item.detectedText || '',
+              recommendedOverlayText: item.recommendedOverlayText || seg.recommendedOverlayText || seg.text,
+              recommendation: item.recommendation || '',
+              screenPosition: (['top', 'middle', 'bottom'].includes(item.screenPosition) ? item.screenPosition : seg.screenPosition || 'bottom') as any
+            };
+          });
+        }
+      } catch (e) {
+        console.error('[OpenAI ChatGPT] Error parsing JSON output:', e);
+      }
+    }
+
+    throw new Error('AI Model (OpenAI ChatGPT) returned invalid response format.');
   }
 }
 

@@ -83,6 +83,7 @@ app.post('/api/analyze-video', upload.single('video'), async (req: Request, res:
   const audioOutputPath = path.join(requestTempDir, 'extracted-audio.wav');
   const framesOutputDir = path.join(requestTempDir, 'frames');
   const keepTemp = req.query.keepTemp === 'true';
+  const llmProvider = ((req.body?.llm || req.query?.llm || 'gemini') as string).toLowerCase() === 'openai' ? 'openai' : 'gemini';
 
   try {
     // 1. Normalize raw uploaded video (resolutions, aspect ratio, frame rate)
@@ -95,13 +96,14 @@ app.post('/api/analyze-video', upload.single('video'), async (req: Request, res:
     await FfmpegService.extractFrames(normalizedVideoPath, framesOutputDir, 0.5);
 
     // 3. Perform AI analysis to generate timestamped on-screen captions
-    console.log('[Analyzer] Processing audio & video feeds...');
-    const captions = await AnalyzerService.analyzeMedia(audioOutputPath, framesOutputDir);
+    console.log(`[Analyzer] Processing audio & video feeds using ${llmProvider.toUpperCase()} provider...`);
+    const captions = await AnalyzerService.analyzeMedia(audioOutputPath, framesOutputDir, llmProvider);
 
     // 3. Return results
     res.status(200).json({
       success: true,
       filename: req.file.originalname,
+      llmProvider,
       keepTemp,
       captionsCount: captions.length,
       captions
