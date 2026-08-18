@@ -2,6 +2,12 @@ import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import fs from 'fs';
 
+// Check for custom static FFmpeg binary (e.g. Render hosted environment)
+const RENDER_FFMPEG_PATH = '/opt/render/project/src/.bin/ffmpeg';
+if (fs.existsSync(RENDER_FFMPEG_PATH)) {
+  ffmpeg.setFfmpegPath(RENDER_FFMPEG_PATH);
+}
+
 class FfmpegService {
   /**
    * Normalizes an input video to standard H.264 / AAC 1080p 30fps format in temp/ before processing.
