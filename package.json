@@ -8,13 +8,8 @@
   ],
   "scripts": {
     "start": "node dist/server.js",
-    "start:api": "node dist/server.js",
-    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev:api\" \"npm run dev:web\"",
-    "dev:api": "tsx watch src/server.ts",
-    "dev:web": "npm run dev --workspace=web",
-    "build": "npm run build:api && npm run build:web",
-    "build:api": "tsc",
-    "build:web": "npm run build --workspace=web",
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
