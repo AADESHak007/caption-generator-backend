@@ -121,6 +121,8 @@ app.post('/api/analyze-video', upload.single('video'), async (req: Request, res:
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+const serverPort = Number(process.env.PORT) || 3000;
+
+app.listen(serverPort, '0.0.0.0', () => {
+  console.log(`Server listening on 0.0.0.0:${serverPort}`);
 });

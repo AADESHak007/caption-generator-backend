@@ -17,5 +17,6 @@ if [ ! -f "ffmpeg" ]; then
   curl -O https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
   tar -xf ffmpeg-release-amd64-static.tar.xz --strip-components=1
   rm -f ffmpeg-release-amd64-static.tar.xz
-  echo "[Build] FFmpeg binary installed at $STORAGE_DIR"
+  chmod +x "$STORAGE_DIR/ffmpeg"
+  echo "[Build] FFmpeg binary installed and executable permissions set at $STORAGE_DIR"
 fi
